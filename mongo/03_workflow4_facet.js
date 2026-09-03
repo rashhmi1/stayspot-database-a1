@@ -1,0 +1,287 @@
+/**
+ * ============================================================================
+ * Workflow 4: Multi-Faceted Review Analytics (MongoDB $facet Pipeline)
+ * ============================================================================
+ * 
+ * Objective:
+ *   Use $facet to output:
+ *   1. Rating distributions (count and percentage across 1 to 5 stars)
+ *   2. Most frequent review tags (using $unwind on location_tags)
+ *   3. Overall average property rating (aggregate summary metrics)
+ * 
+ * Pipeline Architecture:
+ *   - Optional Stage 0 ($match): Scopes analysis across entire platform or a specific property
+ *   - Stage 1 ($facet): Multi-pipeline branch execution:
+ *       * Branch 1 (rating_distributions): Groups by rating, counts occurrences, sorts 5 -> 1
+ *       * Branch 2 (most_frequent_tags): Unwinds location_tags, computes frequency & avg rating
+ *       * Branch 3 (overall_summary): Aggregates total reviews, average, min, and max rating
+ *   - Stage 2 ($project): Normalizes output, joins total count with distributions to
+ *     compute exact percentage shares, and rounds float metrics.
+ * 
+ * Usage:
+ *   mongosh stayspot 03_workflow4_facet.js
+ * ============================================================================
+ */
+
+const targetDb = typeof db !== "undefined" ? db.getSiblingDB("stayspot") : new Mongo().getDB("stayspot");
+
+print("================================================================================");
+print("Workflow 4: Multi-Faceted Review Analytics Pipeline ($facet)");
+print("Database: " + targetDb.getName());
+print("================================================================================\n");
+
+/**
+ * Builds the production-grade multi-faceted review analytics aggregation pipeline.
+ * @param {Object} filterQuery - Optional query filter (e.g. { property_id: "..." })
+ * @returns {Array} MongoDB Aggregation Pipeline
+ */
+function buildReviewAnalyticsPipeline(filterQuery = {}) {
+  const pipeline = [];
+
+  // Stage 0: Optional $match filter (e.g., specific property, date range, or verified bookings)
+  if (filterQuery && Object.keys(filterQuery).length > 0) {
+    pipeline.push({ $match: filterQuery });
+  }
+
+  // Stage 1: Multi-Faceted Processing via $facet
+  pipeline.push({
+    $facet: {
+      // -----------------------------------------------------------------------
+      // Facet 1: Rating Distributions
+      // -----------------------------------------------------------------------
+      rating_distributions: [
+        {
+          $group: {
+            _id: "$rating",
+            review_count: { $sum: 1 }
+          }
+        },
+        {
+          $sort: { _id: -1 } // 5 Stars down to 1 Star
+        },
+        {
+          $project: {
+            _id: 0,
+            rating_star: "$_id",
+            count: "$review_count"
+          }
+        }
+      ],
+
+      // -----------------------------------------------------------------------
+      // Facet 2: Most Frequent Review Tags (using $unwind)
+      // -----------------------------------------------------------------------
+      most_frequent_tags: [
+        {
+          $unwind: "$location_tags"
+        },
+        {
+          $group: {
+            _id: "$location_tags",
+            tag_frequency: { $sum: 1 },
+            avg_rating_for_tag: { $avg: "$rating" }
+          }
+        },
+        {
+          $sort: {
+            tag_frequency: -1,
+            _id: 1
+          }
+        },
+        {
+          $limit: 10
+        },
+        {
+          $project: {
+            _id: 0,
+            tag: "$_id",
+            frequency: "$tag_frequency",
+            avg_rating: { $round: ["$avg_rating_for_tag", 2] }
+          }
+        }
+      ],
+
+      // -----------------------------------------------------------------------
+      // Facet 3: Overall Average Property Rating & Summary Statistics
+      // -----------------------------------------------------------------------
+      overall_rating_summary: [
+        {
+          $group: {
+            _id: null,
+            total_reviews: { $sum: 1 },
+            overall_avg_rating: { $avg: "$rating" },
+            min_rating: { $min: "$rating" },
+            max_rating: { $max: "$rating" },
+            avg_cleanliness: { $avg: "$sub_ratings.cleanliness" },
+            avg_location: { $avg: "$sub_ratings.location" },
+            avg_communication: { $avg: "$sub_ratings.communication" }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            total_reviews: 1,
+            overall_avg_rating: { $round: ["$overall_avg_rating", 2] },
+            min_rating: 1,
+            max_rating: 1,
+            sub_category_averages: {
+              cleanliness: { $round: ["$avg_cleanliness", 2] },
+              location: { $round: ["$avg_location", 2] },
+              communication: { $round: ["$avg_communication", 2] }
+            }
+          }
+        }
+      ]
+    }
+  });
+
+  // Stage 2: Post-Facet Projection: Compute Percentage Shares and Structure Output
+  pipeline.push({
+    $project: {
+      overall_summary: {
+        $ifNull: [
+          { $arrayElemAt: ["$overall_rating_summary", 0] },
+          {
+            total_reviews: 0,
+            overall_avg_rating: 0,
+            min_rating: 0,
+            max_rating: 0,
+            sub_category_averages: { cleanliness: 0, location: 0, communication: 0 }
+          }
+        ]
+      },
+      most_frequent_tags: "$most_frequent_tags",
+      rating_distributions: {
+        $map: {
+          input: "$rating_distributions",
+          as: "dist",
+          in: {
+            rating: "$$dist.rating_star",
+            count: "$$dist.count",
+            percentage: {
+              $cond: [
+                { $gt: [{ $arrayElemAt: ["$overall_rating_summary.total_reviews", 0] }, 0] },
+                {
+                  $round: [
+                    {
+                      $multiply: [
+                        {
+                          $divide: [
+                            "$$dist.count",
+                            { $arrayElemAt: ["$overall_rating_summary.total_reviews", 0] }
+                          ]
+                        },
+                        100
+                      ]
+                    },
+                    1
+                  ]
+                },
+                0
+              ]
+            }
+          }
+        }
+      }
+    }
+  });
+
+  return pipeline;
+}
+
+// -----------------------------------------------------------------------------
+// HELPER: Pretty Formatter for Review Analytics Results
+// -----------------------------------------------------------------------------
+function displayAnalyticsResults(title, results) {
+  print("================================================================================");
+  print(title);
+  print("================================================================================");
+
+  if (!results || results.length === 0) {
+    print("  [No review records found matching criteria]\n");
+    return;
+  }
+
+  const data = results[0];
+  const summary = data.overall_summary;
+  const distributions = data.rating_distributions;
+  const tags = data.most_frequent_tags;
+
+  // 1. Overall Average Rating & Summary
+  print("\n1. OVERALL PROPERTY RATING SUMMARY:");
+  print("--------------------------------------------------------------------------------");
+  print(`  - Total Reviews Logged : ${summary.total_reviews}`);
+  print(`  - Overall Avg Rating   : ${summary.overall_avg_rating} / 5.00 ⭐`);
+  print(`  - Rating Range         : Min: ${summary.min_rating} ⭐ | Max: ${summary.max_rating} ⭐`);
+  if (summary.sub_category_averages) {
+    print(`  - Sub-Ratings Average  : Cleanliness: ${summary.sub_category_averages.cleanliness} | Location: ${summary.sub_category_averages.location} | Communication: ${summary.sub_category_averages.communication}`);
+  }
+
+  // 2. Rating Distributions
+  print("\n2. RATING DISTRIBUTIONS (1 TO 5 STARS):");
+  print("--------------------------------------------------------------------------------");
+  print("  Rating   Count      Share       Distribution Bar");
+  print("  --------------------------------------------------");
+  distributions.forEach(d => {
+    const starStr = `${d.rating} Stars`.padEnd(9);
+    const countStr = d.count.toString().padStart(5);
+    const pctStr = `${d.percentage.toFixed(1)}%`.padStart(7);
+    const barLength = Math.round(d.percentage / 2.5);
+    const bar = "█".repeat(barLength);
+    print(`  ${starStr} : ${countStr}  (${pctStr})  ${bar}`);
+  });
+
+  // 3. Most Frequent Review Tags (using $unwind)
+  print("\n3. TOP 10 MOST FREQUENT REVIEW TAGS ($unwind):");
+  print("--------------------------------------------------------------------------------");
+  print("  Rank  Tag Identifier            Frequency   Avg Rating");
+  print("  ------------------------------------------------------");
+  let tagRank = 1;
+  tags.forEach(t => {
+    const rankStr = `#${tagRank}`.padStart(4);
+    const tagStr = t.tag.padEnd(25);
+    const freqStr = t.frequency.toString().padStart(6);
+    const avgRStr = `${t.avg_rating} ⭐`.padStart(8);
+    print(`  ${rankStr}  ${tagStr} : ${freqStr} reviews  |  ${avgRStr}`);
+    tagRank++;
+  });
+  print("\n");
+}
+
+// -----------------------------------------------------------------------------
+// EXECUTION 1: Platform-Wide Portfolio Review Analytics (All Properties)
+// -----------------------------------------------------------------------------
+const globalPipeline = buildReviewAnalyticsPipeline();
+const globalResults = targetDb.PropertyReviews.aggregate(globalPipeline).toArray();
+displayAnalyticsResults("PLATFORM-WIDE REVIEW ANALYTICS (PORTFOLIO-LEVEL)", globalResults);
+
+// -----------------------------------------------------------------------------
+// EXECUTION 2: Single Property Review Analytics
+// -----------------------------------------------------------------------------
+// Pick one property to demonstrate localized property-level multi-faceted analytics
+const sampleProperty = targetDb.PropertyReviews.findOne({}, { property_id: 1 });
+if (sampleProperty && sampleProperty.property_id) {
+  const propertyId = sampleProperty.property_id;
+  const singlePropertyPipeline = buildReviewAnalyticsPipeline({ property_id: propertyId });
+  const singlePropertyResults = targetDb.PropertyReviews.aggregate(singlePropertyPipeline).toArray();
+  displayAnalyticsResults(`SINGLE PROPERTY REVIEW ANALYTICS (Property ID: ${propertyId})`, singlePropertyResults);
+}
+
+// -----------------------------------------------------------------------------
+// PERFORMANCE & EXPLAIN PLAN (executionStats)
+// -----------------------------------------------------------------------------
+print("--------------------------------------------------------------------------------");
+print("Query Plan & Optimization Analysis for $facet Pipeline:");
+print("--------------------------------------------------------------------------------");
+
+const facetExplain = targetDb.PropertyReviews.explain("executionStats").aggregate(globalPipeline);
+
+if (facetExplain.stages) {
+  print("  - Pipeline Execution Stages: " + facetExplain.stages.map(s => Object.keys(s)[0]).join(" -> "));
+}
+if (facetExplain.executionStats) {
+  print(`  - Total Execution Time    : ${facetExplain.executionStats.executionTimeMillis} ms`);
+  print(`  - Total Documents Examined: ${facetExplain.executionStats.totalDocsExamined}`);
+}
+
+print("\n[SUCCESS] Workflow 4 executed successfully!");
