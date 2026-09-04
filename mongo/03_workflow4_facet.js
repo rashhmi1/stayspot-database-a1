@@ -3,25 +3,12 @@
  * Workflow 4: Multi-Faceted Review Analytics (MongoDB $facet Pipeline)
  * ============================================================================
  * 
- * Objective:
- *   Use $facet to output:
- *   1. Rating distributions (count and percentage across 1 to 5 stars)
- *   2. Most frequent review tags (using $unwind on location_tags)
- *   3. Overall average property rating (aggregate summary metrics)
- * 
- * Pipeline Architecture:
- *   - Optional Stage 0 ($match): Scopes analysis across entire platform or a specific property
- *   - Stage 1 ($facet): Multi-pipeline branch execution:
- *       * Branch 1 (rating_distributions): Groups by rating, counts occurrences, sorts 5 -> 1
- *       * Branch 2 (most_frequent_tags): Unwinds location_tags, computes frequency & avg rating
- *       * Branch 3 (overall_summary): Aggregates total reviews, average, min, and max rating
- *   - Stage 2 ($project): Normalizes output, joins total count with distributions to
- *     compute exact percentage shares, and rounds float metrics.
- * 
  * Usage:
  *   mongosh stayspot 03_workflow4_facet.js
  * ============================================================================
  */
+
+const fs = require("fs"); // Required for JSON stats export
 
 const targetDb = typeof db !== "undefined" ? db.getSiblingDB("stayspot") : new Mongo().getDB("stayspot");
 
@@ -32,13 +19,13 @@ print("=========================================================================
 
 /**
  * Builds the production-grade multi-faceted review analytics aggregation pipeline.
- * @param {Object} filterQuery - Optional query filter (e.g. { property_id: "..." })
+ * @param {Object} filterQuery - Optional query filter (e.g. { property_id: "..." } or { propertyId: "..." })
  * @returns {Array} MongoDB Aggregation Pipeline
  */
 function buildReviewAnalyticsPipeline(filterQuery = {}) {
   const pipeline = [];
 
-  // Stage 0: Optional $match filter (e.g., specific property, date range, or verified bookings)
+  // Stage 0: Optional $match filter
   if (filterQuery && Object.keys(filterQuery).length > 0) {
     pipeline.push({ $match: filterQuery });
   }
@@ -46,9 +33,7 @@ function buildReviewAnalyticsPipeline(filterQuery = {}) {
   // Stage 1: Multi-Faceted Processing via $facet
   pipeline.push({
     $facet: {
-      // -----------------------------------------------------------------------
       // Facet 1: Rating Distributions
-      // -----------------------------------------------------------------------
       rating_distributions: [
         {
           $group: {
@@ -68,12 +53,14 @@ function buildReviewAnalyticsPipeline(filterQuery = {}) {
         }
       ],
 
-      // -----------------------------------------------------------------------
       // Facet 2: Most Frequent Review Tags (using $unwind)
-      // -----------------------------------------------------------------------
+      // Note: Adjust "$location_tags" to "$tags" if your schema uses tags
       most_frequent_tags: [
         {
-          $unwind: "$location_tags"
+          $unwind: {
+            path: "$location_tags",
+            preserveNullAndEmptyArrays: false
+          }
         },
         {
           $group: {
@@ -101,9 +88,6 @@ function buildReviewAnalyticsPipeline(filterQuery = {}) {
         }
       ],
 
-      // -----------------------------------------------------------------------
-      // Facet 3: Overall Average Property Rating & Summary Statistics
-      // -----------------------------------------------------------------------
       overall_rating_summary: [
         {
           $group: {
@@ -135,7 +119,7 @@ function buildReviewAnalyticsPipeline(filterQuery = {}) {
     }
   });
 
-  // Stage 2: Post-Facet Projection: Compute Percentage Shares and Structure Output
+  // Stage 2: Post-Facet Projection (Compute Percentages & Structure Output)
   pipeline.push({
     $project: {
       overall_summary: {
@@ -204,8 +188,8 @@ function displayAnalyticsResults(title, results) {
 
   const data = results[0];
   const summary = data.overall_summary;
-  const distributions = data.rating_distributions;
-  const tags = data.most_frequent_tags;
+  const distributions = data.rating_distributions || [];
+  const tags = data.most_frequent_tags || [];
 
   // 1. Overall Average Rating & Summary
   print("\n1. OVERALL PROPERTY RATING SUMMARY:");
@@ -220,7 +204,7 @@ function displayAnalyticsResults(title, results) {
   // 2. Rating Distributions
   print("\n2. RATING DISTRIBUTIONS (1 TO 5 STARS):");
   print("--------------------------------------------------------------------------------");
-  print("  Rating   Count      Share       Distribution Bar");
+  print("  Rating    Count      Share        Distribution Bar");
   print("  --------------------------------------------------");
   distributions.forEach(d => {
     const starStr = `${d.rating} Stars`.padEnd(9);
@@ -231,10 +215,10 @@ function displayAnalyticsResults(title, results) {
     print(`  ${starStr} : ${countStr}  (${pctStr})  ${bar}`);
   });
 
-  // 3. Most Frequent Review Tags (using $unwind)
+  // 3. Most Frequent Review Tags
   print("\n3. TOP 10 MOST FREQUENT REVIEW TAGS ($unwind):");
   print("--------------------------------------------------------------------------------");
-  print("  Rank  Tag Identifier            Frequency   Avg Rating");
+  print("  Rank  Tag Identifier            Frequency    Avg Rating");
   print("  ------------------------------------------------------");
   let tagRank = 1;
   tags.forEach(t => {
@@ -258,30 +242,27 @@ displayAnalyticsResults("PLATFORM-WIDE REVIEW ANALYTICS (PORTFOLIO-LEVEL)", glob
 // -----------------------------------------------------------------------------
 // EXECUTION 2: Single Property Review Analytics
 // -----------------------------------------------------------------------------
-// Pick one property to demonstrate localized property-level multi-faceted analytics
-const sampleProperty = targetDb.PropertyReviews.findOne({}, { property_id: 1 });
-if (sampleProperty && sampleProperty.property_id) {
-  const propertyId = sampleProperty.property_id;
-  const singlePropertyPipeline = buildReviewAnalyticsPipeline({ property_id: propertyId });
-  const singlePropertyResults = targetDb.PropertyReviews.aggregate(singlePropertyPipeline).toArray();
-  displayAnalyticsResults(`SINGLE PROPERTY REVIEW ANALYTICS (Property ID: ${propertyId})`, singlePropertyResults);
+const sampleProperty = targetDb.PropertyReviews.findOne({}, { property_id: 1, propertyId: 1 });
+if (sampleProperty) {
+  const propIdKey = sampleProperty.property_id ? "property_id" : "propertyId";
+  const propertyId = sampleProperty[propIdKey];
+  if (propertyId) {
+    const singlePropertyPipeline = buildReviewAnalyticsPipeline({ [propIdKey]: propertyId });
+    const singlePropertyResults = targetDb.PropertyReviews.aggregate(singlePropertyPipeline).toArray();
+    displayAnalyticsResults(`SINGLE PROPERTY REVIEW ANALYTICS (Property ID: ${propertyId})`, singlePropertyResults);
+  }
 }
 
 // -----------------------------------------------------------------------------
-// PERFORMANCE & EXPLAIN PLAN (executionStats)
+// PERFORMANCE & EXPLAIN PLAN EXPORT (executionStats)
 // -----------------------------------------------------------------------------
 print("--------------------------------------------------------------------------------");
-print("Query Plan & Optimization Analysis for $facet Pipeline:");
+print("Exporting Query Plan & executionStats to workflow4_execution_stats.json...");
 print("--------------------------------------------------------------------------------");
 
 const facetExplain = targetDb.PropertyReviews.explain("executionStats").aggregate(globalPipeline);
 
-if (facetExplain.stages) {
-  print("  - Pipeline Execution Stages: " + facetExplain.stages.map(s => Object.keys(s)[0]).join(" -> "));
-}
-if (facetExplain.executionStats) {
-  print(`  - Total Execution Time    : ${facetExplain.executionStats.executionTimeMillis} ms`);
-  print(`  - Total Documents Examined: ${facetExplain.executionStats.totalDocsExamined}`);
-}
+// Write explain JSON to disk cleanly
+fs.writeFileSync("workflow4_execution_stats.json", EJSON.stringify(facetExplain, null, 2));
 
-print("\n[SUCCESS] Workflow 4 executed successfully!");
+print("\n[SUCCESS] Workflow 4 executed successfully and execution stats exported!");

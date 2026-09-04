@@ -273,4 +273,32 @@ if (explainStats.executionStats) {
   print("  - Stages in Pipeline : " + explainStats.stages.map(s => Object.keys(s)[0]).join(" -> "));
 }
 
+function explainSearchHotspots(targetLng, targetLat, maxDistanceMeters = 5000) {
+  return db.SearchSessions.explain("executionStats").aggregate([
+    {
+      $geoNear: {
+        near: {
+          type: "Point",
+          coordinates: [parseFloat(targetLng), parseFloat(targetLat)]
+        },
+        distanceField: "distanceInMeters",
+        maxDistance: maxDistanceMeters,
+        spherical: true
+      }
+    },
+    {
+      $group: {
+        _id: {
+          latGrid: { $round: [{ $arrayElemAt: ["$location.coordinates", 1] }, 3] },
+          lngGrid: { $round: [{ $arrayElemAt: ["$location.coordinates", 0] }, 3] }
+        },
+        totalSearches: { $sum: 1 }
+      }
+    }
+  ]);
+}
+
+const stats3 = explainSearchHotspots(-122.4194, 37.7749);
+fs.writeFileSync("workflow3_execution_stats.json", EJSON.stringify(stats3, null, 2));
+
 print("\n[SUCCESS] Workflow 3 executed successfully!");

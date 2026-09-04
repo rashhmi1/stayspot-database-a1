@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""
-StaySpot PostgreSQL Seeder - Generates 100k+ ledger/audit entries and 50k+ bookings
-for the StaySpot project.
-Uses Faker for realistic data and Pydantic for validation.
-"""
 
 import os
 import sys
