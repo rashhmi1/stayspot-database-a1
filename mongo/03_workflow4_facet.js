@@ -1,14 +1,5 @@
-/**
- * ============================================================================
- * Workflow 4: Multi-Faceted Review Analytics (MongoDB $facet Pipeline)
- * ============================================================================
- * 
- * Usage:
- *   mongosh stayspot 03_workflow4_facet.js
- * ============================================================================
- */
 
-const fs = require("fs"); // Required for JSON stats export
+const fs = require("fs"); 
 
 const targetDb = typeof db !== "undefined" ? db.getSiblingDB("stayspot") : new Mongo().getDB("stayspot");
 
@@ -17,23 +8,18 @@ print("Workflow 4: Multi-Faceted Review Analytics Pipeline ($facet)");
 print("Database: " + targetDb.getName());
 print("================================================================================\n");
 
-/**
- * Builds the production-grade multi-faceted review analytics aggregation pipeline.
- * @param {Object} filterQuery - Optional query filter (e.g. { property_id: "..." } or { propertyId: "..." })
- * @returns {Array} MongoDB Aggregation Pipeline
- */
 function buildReviewAnalyticsPipeline(filterQuery = {}) {
   const pipeline = [];
 
-  // Stage 0: Optional $match filter
+  
   if (filterQuery && Object.keys(filterQuery).length > 0) {
     pipeline.push({ $match: filterQuery });
   }
 
-  // Stage 1: Multi-Faceted Processing via $facet
+  
   pipeline.push({
     $facet: {
-      // Facet 1: Rating Distributions
+      
       rating_distributions: [
         {
           $group: {
@@ -42,7 +28,7 @@ function buildReviewAnalyticsPipeline(filterQuery = {}) {
           }
         },
         {
-          $sort: { _id: -1 } // 5 Stars down to 1 Star
+          $sort: { _id: -1 } 
         },
         {
           $project: {
@@ -53,8 +39,8 @@ function buildReviewAnalyticsPipeline(filterQuery = {}) {
         }
       ],
 
-      // Facet 2: Most Frequent Review Tags (using $unwind)
-      // Note: Adjust "$location_tags" to "$tags" if your schema uses tags
+      
+      
       most_frequent_tags: [
         {
           $unwind: {
@@ -119,7 +105,7 @@ function buildReviewAnalyticsPipeline(filterQuery = {}) {
     }
   });
 
-  // Stage 2: Post-Facet Projection (Compute Percentages & Structure Output)
+  
   pipeline.push({
     $project: {
       overall_summary: {
@@ -173,9 +159,9 @@ function buildReviewAnalyticsPipeline(filterQuery = {}) {
   return pipeline;
 }
 
-// -----------------------------------------------------------------------------
-// HELPER: Pretty Formatter for Review Analytics Results
-// -----------------------------------------------------------------------------
+
+
+
 function displayAnalyticsResults(title, results) {
   print("================================================================================");
   print(title);
@@ -191,7 +177,6 @@ function displayAnalyticsResults(title, results) {
   const distributions = data.rating_distributions || [];
   const tags = data.most_frequent_tags || [];
 
-  // 1. Overall Average Rating & Summary
   print("\n1. OVERALL PROPERTY RATING SUMMARY:");
   print("--------------------------------------------------------------------------------");
   print(`  - Total Reviews Logged : ${summary.total_reviews}`);
@@ -201,7 +186,6 @@ function displayAnalyticsResults(title, results) {
     print(`  - Sub-Ratings Average  : Cleanliness: ${summary.sub_category_averages.cleanliness} | Location: ${summary.sub_category_averages.location} | Communication: ${summary.sub_category_averages.communication}`);
   }
 
-  // 2. Rating Distributions
   print("\n2. RATING DISTRIBUTIONS (1 TO 5 STARS):");
   print("--------------------------------------------------------------------------------");
   print("  Rating    Count      Share        Distribution Bar");
@@ -215,7 +199,6 @@ function displayAnalyticsResults(title, results) {
     print(`  ${starStr} : ${countStr}  (${pctStr})  ${bar}`);
   });
 
-  // 3. Most Frequent Review Tags
   print("\n3. TOP 10 MOST FREQUENT REVIEW TAGS ($unwind):");
   print("--------------------------------------------------------------------------------");
   print("  Rank  Tag Identifier            Frequency    Avg Rating");
@@ -232,16 +215,10 @@ function displayAnalyticsResults(title, results) {
   print("\n");
 }
 
-// -----------------------------------------------------------------------------
-// EXECUTION 1: Platform-Wide Portfolio Review Analytics (All Properties)
-// -----------------------------------------------------------------------------
 const globalPipeline = buildReviewAnalyticsPipeline();
 const globalResults = targetDb.PropertyReviews.aggregate(globalPipeline).toArray();
 displayAnalyticsResults("PLATFORM-WIDE REVIEW ANALYTICS (PORTFOLIO-LEVEL)", globalResults);
 
-// -----------------------------------------------------------------------------
-// EXECUTION 2: Single Property Review Analytics
-// -----------------------------------------------------------------------------
 const sampleProperty = targetDb.PropertyReviews.findOne({}, { property_id: 1, propertyId: 1 });
 if (sampleProperty) {
   const propIdKey = sampleProperty.property_id ? "property_id" : "propertyId";
@@ -253,16 +230,12 @@ if (sampleProperty) {
   }
 }
 
-// -----------------------------------------------------------------------------
-// PERFORMANCE & EXPLAIN PLAN EXPORT (executionStats)
-// -----------------------------------------------------------------------------
 print("--------------------------------------------------------------------------------");
 print("Exporting Query Plan & executionStats to workflow4_execution_stats.json...");
 print("--------------------------------------------------------------------------------");
 
 const facetExplain = targetDb.PropertyReviews.explain("executionStats").aggregate(globalPipeline);
 
-// Write explain JSON to disk cleanly
 fs.writeFileSync("workflow4_execution_stats.json", EJSON.stringify(facetExplain, null, 2));
 
 print("\n[SUCCESS] Workflow 4 executed successfully and execution stats exported!");

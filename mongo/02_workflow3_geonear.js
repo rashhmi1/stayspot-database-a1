@@ -1,59 +1,19 @@
-/**
- * ============================================================================
- * Workflow 3: Trending Search Hotspots (MongoDB Geospatial Aggregation)
- * ============================================================================
- * 
- * Objective:
- *   Write a MongoDB $geoNear pipeline to cluster recent SearchSessions within
- *   a 5km radius of specific coordinates.
- * 
- * Pipeline Architecture:
- *   1. $geoNear:
- *      - Leverages 2dsphere index on `SearchSessions.location`
- *      - Filters strictly within 5,000 meters (5 km) of target coordinates
- *      - spherical: true calculates real-world geodesic spherical distances
- *      - Filters for recent sessions created within the active 2-hour window
- *   2. $project:
- *      - Extracts coordinates, distance, and projects spatial cluster keys
- *        (rounding coordinates to ~1.1km micro-cells)
- *   3. $group:
- *      - Clusters recent pin drops into localized demand hotspots
- *      - Aggregates search volume, unique searchers, average distance, and recency
- *   4. $addFields / $project:
- *      - Derives hotspot demand intensity rating and formatted coordinates
- *   5. $sort:
- *      - Ranks hotspots descending by search volume to surface top trending zones
- * 
- * Usage:
- *   mongosh stayspot 02_workflow3_geonear.js
- * ============================================================================
- */
-
 const targetDb = typeof db !== "undefined" ? db.getSiblingDB("stayspot") : new Mongo().getDB("stayspot");
 
 print("================================================================================");
 print("Workflow 3: Trending Search Hotspots Pipeline");
 print("Database: " + targetDb.getName());
 print("================================================================================\n");
-
-// -----------------------------------------------------------------------------
-// Target Center Coordinates & Parameters
-// -----------------------------------------------------------------------------
-// Coordinates: Downtown San Francisco / Union Square Hub [longitude, latitude]
 const TARGET_COORDINATES = [-122.4194, 37.7749];
-const MAX_RADIUS_METERS = 5000; // 5 km radius limit
-const RECENCY_WINDOW_HOURS = 2; // Active 2-hour window matching TTL index
+const MAX_RADIUS_METERS = 5000; 
+const RECENCY_WINDOW_HOURS = 2; 
 const RECENCY_CUTOFF = new Date(Date.now() - RECENCY_WINDOW_HOURS * 60 * 60 * 1000);
 
 print(`Target Center Coordinates : [Longitude: ${TARGET_COORDINATES[0]}, Latitude: ${TARGET_COORDINATES[1]}]`);
 print(`Max Search Radius         : ${MAX_RADIUS_METERS} meters (${MAX_RADIUS_METERS / 1000} km)`);
 print(`Recency Filter Cutoff     : >= ${RECENCY_CUTOFF.toISOString()} (Past ${RECENCY_WINDOW_HOURS} hours)\n`);
 
-// -----------------------------------------------------------------------------
-// Aggregation Pipeline Definition: Trending Search Hotspots
-// -----------------------------------------------------------------------------
 const trendingHotspotsPipeline = [
-  // Stage 1: $geoNear - MUST be the first stage in pipeline
   {
     $geoNear: {
       near: {
@@ -69,7 +29,6 @@ const trendingHotspotsPipeline = [
     }
   },
 
-  // Stage 2: Spatial Discretization & Attribute Shaping
   {
     $project: {
       session_id: 1,
@@ -79,10 +38,8 @@ const trendingHotspotsPipeline = [
       filters: 1,
       device_info: 1,
       raw_coordinates: "$location.coordinates",
-      // Grid clustering: round coordinates to 2 decimal places (~1.1 km spatial resolution)
       cluster_lon: { $round: [{ $arrayElemAt: ["$location.coordinates", 0] }, 2] },
       cluster_lat: { $round: [{ $arrayElemAt: ["$location.coordinates", 1] }, 2] },
-      // Proximity ring bucket for radial analysis
       distance_ring_km: {
         $concat: [
           { $toString: { $floor: { $divide: ["$distance_meters", 1000] } } },
@@ -94,7 +51,6 @@ const trendingHotspotsPipeline = [
     }
   },
 
-  // Stage 3: $group - Spatial Clustering into Demand Hotspots
   {
     $group: {
       _id: {
@@ -113,7 +69,6 @@ const trendingHotspotsPipeline = [
     }
   },
 
-  // Stage 4: Hotspot Metrics Shaping
   {
     $project: {
       _id: 0,
@@ -146,7 +101,6 @@ const trendingHotspotsPipeline = [
     }
   },
 
-  // Stage 5: $sort - Rank hotspots by search volume descending
   {
     $sort: {
       search_volume: -1,
@@ -155,9 +109,6 @@ const trendingHotspotsPipeline = [
   }
 ];
 
-// -----------------------------------------------------------------------------
-// Auxiliary Pipeline: Concentric Radial Distance Ring Distribution
-// -----------------------------------------------------------------------------
 const radialDensityPipeline = [
   {
     $geoNear: {
@@ -207,9 +158,6 @@ const radialDensityPipeline = [
   }
 ];
 
-// -----------------------------------------------------------------------------
-// EXECUTION: Run Hotspot Clustering Pipeline
-// -----------------------------------------------------------------------------
 print("--------------------------------------------------------------------------------");
 print("Executing Trending Search Hotspots Clustering Pipeline...");
 print("--------------------------------------------------------------------------------");
@@ -233,9 +181,6 @@ hotspotResults.forEach(h => {
 
 print(`Total Pin Drops in 5km Radius: ${totalClusteredSearches}`);
 
-// -----------------------------------------------------------------------------
-// EXECUTION: Run Concentric Radial Distance Density
-// -----------------------------------------------------------------------------
 print("\n--------------------------------------------------------------------------------");
 print("Radial Distance Density Breakdown (Concentric Rings):");
 print("--------------------------------------------------------------------------------");
@@ -244,16 +189,12 @@ radialResults.forEach(r => {
   print(`  * ${r.distance_ring.padEnd(25)} : ${r.pin_drops_count.toString().padStart(4)} searches | Avg Distance: ${r.avg_distance_m}m | Searchers: ${r.unique_searchers}`);
 });
 
-// -----------------------------------------------------------------------------
-// PERFORMANCE & INDEX UTILIZATION CHECK (explain)
-// -----------------------------------------------------------------------------
 print("\n--------------------------------------------------------------------------------");
 print("Query Plan & Index Utilization Analysis (explain executionStats):");
 print("--------------------------------------------------------------------------------");
 
 const explainStats = targetDb.SearchSessions.explain("executionStats").aggregate(trendingHotspotsPipeline);
 
-// Extract execution metrics
 const executionSuccess = explainStats.stages || explainStats.executionStats;
 print("[EXPLAIN] Aggregation Plan Summary:");
 if (explainStats.stages && explainStats.stages.length > 0) {
