@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-"""
-StaySpot MongoDB Seeder - Generates 500k+ SearchSessions (geospatial pings)
-with realistic distribution around San Francisco for StaySpot project.
-Uses Faker for realistic data and Pydantic for validation.
-"""
-
 import os
 import sys
 import uuid
@@ -27,7 +21,7 @@ try:
     from pydantic import BaseModel, Field, field_validator, model_validator
 except ImportError:
     print("Error: faker or pydantic not installed. Run: pip install faker pydantic")
-    sys.exit(1)
+    exit()
 
 
 fake = Faker()
@@ -261,7 +255,7 @@ def main():
     parser.add_argument("--db", default="stayspot", help="Database name")
     parser.add_argument("--count", type=int, default=500000, help="Number of SearchSessions to generate")
     parser.add_argument("--batch", type=int, default=5000, help="Batch size for bulk inserts")
-    parser.add_argument("--no-clear", action="store_true", help="Don't clear existing data")
+    parser.add_argument("--no-clear", default=False, action="store_true", help="Don't clear existing data")
     args = parser.parse_args()
     
     print("=" * 60)
