@@ -285,7 +285,7 @@ if (fs.existsSync(statsFilePath)) {
   }
 }
 
-statsList.push(stats3);
+statsList[0] = stats3;
 fs.writeFileSync(statsFilePath, EJSON.stringify(statsList, null, 2));
 
 print(`[SUCCESS] Workflow 3 execution stats saved to ${statsFilePath}`);

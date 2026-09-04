@@ -21,7 +21,7 @@ try:
     from pydantic import BaseModel, Field, field_validator, model_validator
 except ImportError:
     print("Error: faker or pydantic not installed. Run: pip install faker pydantic")
-    exit()
+    sys.exit(1)
 
 
 fake = Faker()
@@ -357,14 +357,7 @@ def seed_search_sessions(
     return total_inserted
 
 
-def generate_property_amenities(property_ids: List[str], property_titles: Optional[List[str]] = None) -> PropertyAmenities:
-    property_id = random.choice(property_ids)
-    property_title = None
-    if property_titles:
-        idx = property_ids.index(property_id) if property_id in property_ids else None
-        if idx is not None and idx < len(property_titles):
-            property_title = property_titles[idx]
-
+def generate_property_amenities(property_id: str, property_title: Optional[str] = None) -> PropertyAmenities:
     house_rules = []
     num_rules = random.randint(3, 8)
     for _ in range(num_rules):
@@ -481,7 +474,8 @@ def seed_property_amenities(
 
     try:
         for i, prop_id in enumerate(property_ids):
-            amenities = generate_property_amenities(property_ids, property_titles)
+            title = property_titles[i] if property_titles and i < len(property_titles) else None
+            amenities = generate_property_amenities(prop_id, title)
             batch.append(InsertOne(amenities.to_mongo_dict()))
 
             if len(batch) >= batch_size:

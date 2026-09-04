@@ -1,5 +1,8 @@
 # StaySpot — Vacation Rental & Experiences: Database Layer
 
+- **GitHub Repository:** https://github.com/rashhmi1/stayspot-database-a1
+- **Commit Hash:** e450705917a1171855944583f2162a144add8a9c
+
 A polyglot-persistence backend for a vacation-rental platform: PostgreSQL
 holds transactional data (guests, wallets, properties, bookings) and MongoDB
 holds flexible/high-volume data (amenity catalogs, reviews, geospatial search
