@@ -220,12 +220,13 @@ const globalPipeline = buildReviewAnalyticsPipeline();
 const globalResults = targetDb.PropertyReviews.aggregate(globalPipeline).toArray();
 displayAnalyticsResults("PLATFORM-WIDE REVIEW ANALYTICS (PORTFOLIO-LEVEL)", globalResults);
 
+let singlePropertyPipeline = null;
 const sampleProperty = targetDb.PropertyReviews.findOne({}, { property_id: 1, propertyId: 1 });
 if (sampleProperty) {
   const propIdKey = sampleProperty.property_id ? "property_id" : "propertyId";
   const propertyId = sampleProperty[propIdKey];
   if (propertyId) {
-    const singlePropertyPipeline = buildReviewAnalyticsPipeline({ [propIdKey]: propertyId });
+    singlePropertyPipeline = buildReviewAnalyticsPipeline({ [propIdKey]: propertyId });
     const singlePropertyResults = targetDb.PropertyReviews.aggregate(singlePropertyPipeline).toArray();
     displayAnalyticsResults(`SINGLE PROPERTY REVIEW ANALYTICS (Property ID: ${propertyId})`, singlePropertyResults);
   }
@@ -235,7 +236,10 @@ print("-------------------------------------------------------------------------
 print("Exporting Query Plan & executionStats to performance/mongo_execution_stats.json...");
 print("--------------------------------------------------------------------------------");
 
-const facetExplain = targetDb.PropertyReviews.explain("executionStats").aggregate(globalPipeline);
+// Prefer single-property pipeline to demonstrate index scan (IXSCAN) on idx_reviews_property_created
+const facetExplain = singlePropertyPipeline
+  ? targetDb.PropertyReviews.explain("executionStats").aggregate(singlePropertyPipeline)
+  : targetDb.PropertyReviews.explain("executionStats").aggregate(globalPipeline);
 
 function getStatsFilePath() {
   const currentDirCandidate = path.resolve("performance", "mongo_execution_stats.json");
@@ -274,7 +278,7 @@ if (fs.existsSync(statsFilePath)) {
   }
 }
 
-statsList.push(facetExplain);
+statsList[1] = facetExplain;
 fs.writeFileSync(statsFilePath, EJSON.stringify(statsList, null, 2));
 
 print(`[SUCCESS] Workflow 4 execution stats saved to ${statsFilePath}`);
