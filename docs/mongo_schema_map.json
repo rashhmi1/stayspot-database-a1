@@ -1,0 +1,188 @@
+{
+  "$comment": "Document structure & validation map for StaySpot's MongoDB layer. Reverse-engineered from mongo/01_collections_and_indexes.js, mongo/02_workflow3_geonear.js and mongo/03_workflow4_facet.js. Generated because docs/mongo_schema_map.json existed only as an empty placeholder in the repo.",
+  "database": "stayspot",
+  "generated_from": [
+    "mongo/01_collections_and_indexes.js",
+    "mongo/02_workflow3_geonear.js",
+    "mongo/03_workflow4_facet.js",
+    "data_generation/mongo_seeder.py",
+    "performance/mongo_execution_stats.json"
+  ],
+  "cross_database_relationships": {
+    "engine": "No FKs across engines. Postgres UUIDs are duplicated into Mongo documents as plain strings and matched by pattern, not enforced by any DB constraint.",
+    "links": [
+      "PropertyAmenities.property_id -> postgres.properties.id",
+      "PropertyReviews.property_id -> postgres.properties.id",
+      "PropertyReviews.guest_id -> postgres.guests.id",
+      "PropertyReviews.booking_id -> postgres.bookings.id (optional, no format validation applied)",
+      "SearchSessions.user_id -> postgres.guests.id OR an anonymous/pre-signup identifier (schema does not restrict format, unlike property_id/guest_id in the other two collections)"
+    ]
+  },
+  "collections": {
+    "PropertyAmenities": {
+      "purpose": "Flexible catalog document per property: general amenities plus nested house_rules / accessibility_features arrays that can mix free-text strings and structured rule objects.",
+      "document_count_seeded": 0,
+      "seeding_note": "Not populated by data_generation/mongo_seeder.py, which only seeds SearchSessions. A dedicated PropertyAmenities seeding routine is not present in this repo yet.",
+      "validation": {
+        "validationLevel": "strict on create / moderate on collMod (see ensureCollectionWithValidator in 01_collections_and_indexes.js)",
+        "validationAction": "error",
+        "required": ["property_id", "amenities", "house_rules", "accessibility_features"],
+        "additionalProperties": true
+      },
+      "fields": {
+        "property_id": {
+          "bsonType": "string",
+          "required": true,
+          "pattern": "UUID v4 string (regex-validated)",
+          "description": "FK to postgres.properties.id"
+        },
+        "property_title": {
+          "bsonType": "string",
+          "required": false,
+          "description": "Optional denormalized cache of properties.title to avoid a cross-DB join on read"
+        },
+        "amenities": {
+          "bsonType": "array<string>",
+          "required": true,
+          "description": "Flat list of general amenities (e.g. WiFi, AC, EV Charging)"
+        },
+        "house_rules": {
+          "bsonType": "array<string|object>",
+          "required": true,
+          "minItems": 1,
+          "description": "Nested array — either free-text rule strings or structured rule objects (schema intentionally left open-shaped)"
+        },
+        "accessibility_features": {
+          "bsonType": "array<string|object>",
+          "required": true,
+          "minItems": 1,
+          "description": "Nested array of accessibility features, same flexible string/object shape as house_rules"
+        },
+        "safety_features": {
+          "bsonType": "array<string>",
+          "required": false,
+          "description": "Optional safety equipment list (smoke detector, fire extinguisher, etc.)"
+        },
+        "host_guidelines": {
+          "bsonType": "object",
+          "required": false,
+          "description": "Freeform object — keyless entry instructions, parking notes, host contact preferences"
+        },
+        "updated_at": {
+          "bsonType": "date",
+          "required": false,
+          "description": "Last catalog update timestamp"
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_amenities_property_id_unique",
+          "key": { "property_id": 1 },
+          "unique": true,
+          "purpose": "One amenities document per property; also the lookup path for property detail pages"
+        },
+        {
+          "name": "idx_amenities_catalog",
+          "key": { "amenities": 1 },
+          "unique": false,
+          "purpose": "Multikey index supporting 'find properties with amenity X' style catalog filtering"
+        }
+      ]
+    },
+    "PropertyReviews": {
+      "purpose": "One document per guest review: overall + optional sub-category ratings, free-text location tags used for review analytics, and review text.",
+      "document_count_observed": 128,
+      "seeding_note": "Not populated by data_generation/mongo_seeder.py either. The 128-document count comes from the captured run in performance/mongo_execution_stats.json (a small ad-hoc/manual dataset), not a bulk seed matching the properties/guests volumes on the Postgres side.",
+      "validation": {
+        "validationLevel": "strict on create / moderate on collMod",
+        "validationAction": "error",
+        "required": ["property_id", "guest_id", "rating", "location_tags", "review_text", "created_at"],
+        "additionalProperties": "not restricted (no additionalProperties:false set)"
+      },
+      "fields": {
+        "property_id": { "bsonType": "string", "required": true, "pattern": "UUID v4 string", "description": "FK to postgres.properties.id" },
+        "guest_id": { "bsonType": "string", "required": true, "pattern": "UUID v4 string", "description": "FK to postgres.guests.id" },
+        "booking_id": { "bsonType": "string", "required": false, "description": "Optional FK to postgres.bookings.id (no pattern/format check applied, unlike property_id/guest_id)" },
+        "rating": { "bsonType": "int|double|decimal", "required": true, "minimum": 1, "maximum": 5, "description": "Overall star rating" },
+        "sub_ratings": {
+          "bsonType": "object",
+          "required": false,
+          "description": "Optional per-category ratings, each bounded 1-5",
+          "properties": ["cleanliness", "accuracy", "communication", "location", "check_in", "value"]
+        },
+        "location_tags": {
+          "bsonType": "array<string>",
+          "required": true,
+          "minItems": 1,
+          "description": "Free-text descriptive tags (e.g. 'downtown', 'walkable') — the field $unwind'd in Workflow 4's most_frequent_tags facet"
+        },
+        "review_text": { "bsonType": "string", "required": true, "minLength": 3, "description": "Guest-authored review body" },
+        "created_at": { "bsonType": "date", "required": true, "description": "Review submission timestamp" }
+      },
+      "indexes": [
+        { "name": "idx_reviews_property_created", "key": { "property_id": 1, "created_at": -1 }, "purpose": "Per-property review feed, most recent first" },
+        { "name": "idx_reviews_rating", "key": { "rating": 1 }, "purpose": "Supports rating_distributions facet / rating filters" },
+        { "name": "idx_reviews_location_tags", "key": { "location_tags": 1 }, "purpose": "Multikey index over location_tags array for tag-based lookups" },
+        { "name": "idx_reviews_guest_id", "key": { "guest_id": 1 }, "purpose": "'My reviews' lookups by guest" }
+      ],
+      "observed_query_behavior": {
+        "workflow4_global_facet": "The unfiltered Workflow 4 pipeline ($facet with no preceding $match) does a COLLSCAN, since none of the four indexes above cover 'match everything'. Per-property calls (buildReviewAnalyticsPipeline({property_id})) would use idx_reviews_property_created instead. See performance/postgres_explain_analyzes.txt and performance/mongo_execution_stats.json (workflow4_facet) for captured numbers."
+      }
+    },
+    "SearchSessions": {
+      "purpose": "Ephemeral geospatial telemetry: every map pin-drop a guest makes while searching, auto-expired after 2 hours via TTL index.",
+      "document_count_seeded": 500000,
+      "document_count_observed_at_query_time": "~529712 examined / 264856 matched within the workflow-3 $geoNear + created_at filter (see below) — lower than 500000 because the TTL index continuously expires sessions older than 2 hours",
+      "seeding_note": "The only collection actually populated by data_generation/mongo_seeder.py (target_count default 500000, weighted across 12 in-range + 4 out-of-range SF hotspots).",
+      "validation": {
+        "validationLevel": "strict on create / moderate on collMod",
+        "validationAction": "error",
+        "required": ["session_id", "user_id", "location", "created_at"],
+        "additionalProperties": "not restricted"
+      },
+      "fields": {
+        "session_id": { "bsonType": "string", "required": true, "description": "Unique tracking id for the pin-drop event (seeder format: sess-<12 hex chars>)" },
+        "user_id": { "bsonType": "string", "required": true, "description": "Guest or anonymous searcher identifier — no UUID pattern enforced here, unlike PropertyReviews.guest_id" },
+        "location": {
+          "bsonType": "object",
+          "required": true,
+          "description": "GeoJSON Point",
+          "subfields": {
+            "type": { "enum": ["Point"] },
+            "coordinates": { "bsonType": "array<double|int|long|decimal>", "minItems": 2, "maxItems": 2, "order": "[longitude, latitude]" }
+          }
+        },
+        "search_radius_meters": { "bsonType": "int|double", "required": false, "minimum": 100, "maximum": 100000, "description": "Requested search radius; not set by the current seeder even though the schema allows it" },
+        "filters": { "bsonType": "object", "required": false, "description": "Search criteria snapshot (min_price, max_price, min_rating, required_amenities, check_in_date, guests, instant_book)" },
+        "device_info": { "bsonType": "object", "required": false, "description": "platform / app_version / device_model" },
+        "created_at": { "bsonType": "date", "required": true, "description": "Pin-drop timestamp; governs the 2-hour TTL expiry" }
+      },
+      "indexes": [
+        {
+          "name": "idx_searchsessions_location_2dsphere",
+          "key": { "location": "2dsphere" },
+          "purpose": "Backs $geoNear / $near queries (Workflow 3 hotspot clustering)",
+          "confirmed_used_by": "GEO_NEAR_2DSPHERE stage in the Workflow 3 winningPlan (see performance/mongo_execution_stats.json -> workflow3_geoNear)"
+        },
+        {
+          "name": "idx_searchsessions_created_at_ttl_2h",
+          "key": { "created_at": 1 },
+          "expireAfterSeconds": 7200,
+          "purpose": "TTL — background thread deletes documents ~2 hours after created_at"
+        },
+        {
+          "name": "idx_searchsessions_user_time",
+          "key": { "user_id": 1, "created_at": -1 },
+          "purpose": "Per-user recent-search lookups; not exercised by Workflow 3 or 4"
+        }
+      ],
+      "observed_query_behavior": {
+        "workflow3_geonear": "$geoNear plans as FETCH -> GEO_NEAR_2DSPHERE using idx_searchsessions_location_2dsphere for the spatial bound, then applies the created_at >= cutoff filter as a post-fetch FETCH-stage filter (not index-covered). 264,856 of 529,712 examined docs matched within the 5km / 2h window in the captured run (909ms). A compound index such as {location:\"2dsphere\", created_at:1} is not supported by MongoDB for 2dsphere + range together in a single scan the way it is here, so this filter cost is expected, not a misconfiguration."
+      }
+    }
+  },
+  "known_gaps_and_assumptions": [
+    "PropertyAmenities and PropertyReviews validators and indexes are fully provisioned by mongo/01_collections_and_indexes.js, but no bulk seeder writes documents into them — only SearchSessions reaches the 500k+ telemetry-ping target from the assignment spec. The 128 PropertyReviews documents referenced in performance/mongo_execution_stats.json come from a small manual/ad-hoc dataset used to exercise Workflow 4, not a production-scale seed.",
+    "PropertyReviews.guest_id and property_id are UUID-pattern-validated against Postgres' UUID format; SearchSessions.user_id and PropertyAmenities have no equivalent cross-DB format check, so a malformed or orphaned reference on those fields would not be caught by MongoDB's schema validator."
+  ]
+}
