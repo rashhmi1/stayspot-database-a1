@@ -72,12 +72,11 @@ python3 data_generation/postgres_seeder.py --uri "$PG_URI"
 python3 data_generation/mongo_seeder.py --uri "mongodb://localhost:27017" --db stayspot
 #   -> 500,000 SearchSessions geospatial pings (2h TTL, so the live count
 #      drifts below 500k as older pings expire)
-```
 
-`data_generation/mongo_seeder.py` only seeds `SearchSessions`. `PropertyAmenities`
-and `PropertyReviews` get their collections + validators + indexes from
-`mongo/01_collections_and_indexes.js`, but there is currently no bulk seeder
-for either — see "Known issues" below.
+# To also seed PropertyAmenities and PropertyReviews:
+python3 data_generation/mongo_seeder.py --uri "mongodb://localhost:27017" --db stayspot \
+  --pg-uri "$PG_URI" --seed-all --reviews-per-property 5
+#   -> 1,000 PropertyAmenities + 5,000 PropertyReviews (default)
 
 ### 4. Run the workflows
 
@@ -124,15 +123,11 @@ actual `.sql`/`.py` files is a decision for you to make and commit.
    bypasses via direct `INSERT`) and skip/retry on conflict, or pre-shuffle
    guest IDs so each is used at most once for a `CHECKED_IN` row.
 
-3. **`PropertyReviews` / `PropertyAmenities` aren't bulk-seeded.**
-   `data_generation/mongo_seeder.py` only populates `SearchSessions` (the
-   500k+ geospatial-ping target from the spec). The captured
-   `performance/mongo_execution_stats.json` run against `PropertyReviews`
-   reflects a small, ad-hoc dataset (128 documents) rather than a volume
-   matching the 1,000 seeded properties — Workflow 4's numbers should be
-   read as "pipeline is correct," not "pipeline is tested at scale." A
-   `mongo_reviews_seeder`/`mongo_amenities_seeder` would need to be added to
-   generate representative data for those two collections.
+3. **`PropertyReviews` / `PropertyAmenities` are now bulk-seeded.**
+   Run with `--seed-all --pg-uri "$PG_URI"` to populate both collections.
+   The default is 5 reviews per property (configurable via `--reviews-per-property`).
+   `performance/mongo_execution_stats.json`'s 128-document run was from a prior
+   ad-hoc dataset — the new seeder generates at scale matching the 1,000 properties.
 
 ## Performance Summary
 

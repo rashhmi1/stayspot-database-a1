@@ -1,5 +1,6 @@
 
 const fs = require("fs"); 
+const path = require("path");
 
 const targetDb = typeof db !== "undefined" ? db.getSiblingDB("stayspot") : new Mongo().getDB("stayspot");
 
@@ -231,11 +232,50 @@ if (sampleProperty) {
 }
 
 print("--------------------------------------------------------------------------------");
-print("Exporting Query Plan & executionStats to workflow4_execution_stats.json...");
+print("Exporting Query Plan & executionStats to performance/mongo_execution_stats.json...");
 print("--------------------------------------------------------------------------------");
 
 const facetExplain = targetDb.PropertyReviews.explain("executionStats").aggregate(globalPipeline);
 
-fs.writeFileSync("workflow4_execution_stats.json", EJSON.stringify(facetExplain, null, 2));
+function getStatsFilePath() {
+  const currentDirCandidate = path.resolve("performance", "mongo_execution_stats.json");
+  const parentDirCandidate = path.resolve("..", "performance", "mongo_execution_stats.json");
 
+  if (fs.existsSync(path.dirname(currentDirCandidate))) {
+    return currentDirCandidate;
+  } else if (fs.existsSync(path.dirname(parentDirCandidate))) {
+    return parentDirCandidate;
+  }
+
+  const defaultDir = path.resolve("performance");
+  if (!fs.existsSync(defaultDir)) {
+    fs.mkdirSync(defaultDir, { recursive: true });
+  }
+  return path.resolve(defaultDir, "mongo_execution_stats.json");
+}
+
+const statsFilePath = getStatsFilePath();
+let statsList = [];
+if (fs.existsSync(statsFilePath)) {
+  try {
+    const raw = fs.readFileSync(statsFilePath, "utf8");
+    if (raw.trim()) {
+      const parsed = EJSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        statsList = parsed;
+      } else {
+        print(`[WARN] Existing content in ${statsFilePath} is not a list. Initializing empty list.`);
+        statsList = [];
+      }
+    }
+  } catch (err) {
+    print(`[WARN] Could not parse existing ${statsFilePath}: ${err.message}. Initializing fresh list.`);
+    statsList = [];
+  }
+}
+
+statsList.push(facetExplain);
+fs.writeFileSync(statsFilePath, EJSON.stringify(statsList, null, 2));
+
+print(`[SUCCESS] Workflow 4 execution stats saved to ${statsFilePath}`);
 print("\n[SUCCESS] Workflow 4 executed successfully and execution stats exported!");
