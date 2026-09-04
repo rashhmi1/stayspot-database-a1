@@ -21,8 +21,8 @@
   "collections": {
     "PropertyAmenities": {
       "purpose": "Flexible catalog document per property: general amenities plus nested house_rules / accessibility_features arrays that can mix free-text strings and structured rule objects.",
-      "document_count_seeded": 0,
-      "seeding_note": "Not populated by data_generation/mongo_seeder.py, which only seeds SearchSessions. A dedicated PropertyAmenities seeding routine is not present in this repo yet.",
+      "document_count_seeded": 1000,
+      "seeding_note": "Populated by data_generation/mongo_seeder.py --seed-all. Generates one document per property with randomized amenities, house_rules, accessibility_features, and optional safety_features/host_guidelines.",
       "validation": {
         "validationLevel": "strict on create / moderate on collMod (see ensureCollectionWithValidator in 01_collections_and_indexes.js)",
         "validationAction": "error",
@@ -91,8 +91,8 @@
     },
     "PropertyReviews": {
       "purpose": "One document per guest review: overall + optional sub-category ratings, free-text location tags used for review analytics, and review text.",
-      "document_count_observed": 128,
-      "seeding_note": "Not populated by data_generation/mongo_seeder.py either. The 128-document count comes from the captured run in performance/mongo_execution_stats.json (a small ad-hoc/manual dataset), not a bulk seed matching the properties/guests volumes on the Postgres side.",
+      "document_count_seeded": "5000 (5 per property x 1000 properties, configurable via --reviews-per-property)",
+      "seeding_note": "Populated by data_generation/mongo_seeder.py --seed-all. Generates reviews with realistic rating distributions (3-5 stars), optional sub_ratings, location_tags, and review_text. The 128-document count in performance/mongo_execution_stats.json was from a prior ad-hoc/manual dataset.",
       "validation": {
         "validationLevel": "strict on create / moderate on collMod",
         "validationAction": "error",
