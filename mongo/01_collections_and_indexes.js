@@ -1,38 +1,8 @@
-/**
- * ============================================================================
- * StaySpot MongoDB Database Provisioning, Schema Constraints & Indexes
- * ============================================================================
- * 
- * Scope:
- * 1. Step 1: Unstructured Database Provisioning & Schema Constraints
- *    - PropertyAmenities: Flexible catalog documents with nested arrays for
- *      house rules, accessibility features, and safety items.
- *    - PropertyReviews: Structured reviews with ratings (1-5), location tags,
- *      timestamps, and sub-category ratings.
- *    - SearchSessions: Geospatial logs of user pin drops with GeoJSON points.
- * 
- * 2. Step 2: Database-Heavy Engineering Tasks
- *    - 2dsphere index on SearchSessions.location
- *    - 2-hour TTL index on SearchSessions.created_at (7200 seconds)
- *    - Secondary and compound indexes for high-performance retrieval
- * 
- * Usage:
- *   mongosh stayspot 01_collections_and_indexes.js
- *   -- or --
- *   mongosh mongodb://localhost:27017/stayspot 01_collections_and_indexes.js
- * ============================================================================
- */
-
-// Target database connection
 const targetDb = typeof db !== "undefined" ? db.getSiblingDB("stayspot") : new Mongo().getDB("stayspot");
 
 print("================================================================================");
 print("Initializing StaySpot MongoDB Schema & Indexes on database: " + targetDb.getName());
 print("================================================================================\n");
-
-// -----------------------------------------------------------------------------
-// Helper: Safe Collection Reconfiguration with $jsonSchema
-// -----------------------------------------------------------------------------
 function ensureCollectionWithValidator(dbInstance, collName, validatorDoc) {
   const existingColls = dbInstance.getCollectionNames();
   if (existingColls.includes(collName)) {
@@ -52,13 +22,6 @@ function ensureCollectionWithValidator(dbInstance, collName, validatorDoc) {
     });
   }
 }
-
-// =============================================================================
-// STEP 1: SCHEMA CONSTRAINTS & JSON SCHEMA VALIDATORS
-// =============================================================================
-
-// 1. PropertyAmenities Collection
-// Flexible catalog documents with nested arrays for house rules and accessibility features
 const propertyAmenitiesValidator = {
   $jsonSchema: {
     bsonType: "object",
@@ -112,14 +75,12 @@ const propertyAmenitiesValidator = {
         description: "Timestamp of last catalog update"
       }
     },
-    additionalProperties: true // Flexible catalog: allows hosts to add custom unstructured specs
+    additionalProperties: true 
   }
 };
 
 ensureCollectionWithValidator(targetDb, "PropertyAmenities", propertyAmenitiesValidator);
 
-// 2. PropertyReviews Collection
-// Structured reviews with ratings (1-5), location tags, timestamps, and guest references
 const propertyReviewsValidator = {
   $jsonSchema: {
     bsonType: "object",
@@ -180,8 +141,6 @@ const propertyReviewsValidator = {
 
 ensureCollectionWithValidator(targetDb, "PropertyReviews", propertyReviewsValidator);
 
-// 3. SearchSessions Collection
-// Geospatial logs of where users are actively dropping pins to search for homes
 const searchSessionsValidator = {
   $jsonSchema: {
     bsonType: "object",
@@ -239,18 +198,11 @@ const searchSessionsValidator = {
 
 ensureCollectionWithValidator(targetDb, "SearchSessions", searchSessionsValidator);
 
-// =============================================================================
-// STEP 2: DATABASE-HEAVY ENGINEERING TASKS (INDEXES & TTL)
-// =============================================================================
 
 print("\n--------------------------------------------------------------------------------");
 print("Provisioning MongoDB Indexes & TTL Expiration Policies...");
 print("--------------------------------------------------------------------------------");
 
-// --- SearchSessions Indexes ---
-// Task: Create a 2dsphere index on SearchSessions.location and a 2-hour TTL index on created_at
-
-// 1. Drop conflicting legacy indexes if they exist (e.g. obsolete pin or updatedAt TTL or camelCase indexes)
 try {
   const legacySessionIndexes = ["pin_2dsphere", "searchSessions_ttl", "userId_1", "createdAt_1"];
   const existingSessionIndexes = targetDb.SearchSessions.getIndexes().map(i => i.name);
@@ -270,10 +222,8 @@ try {
     }
   }
 } catch (e) {
-  // Ignore if index doesn't exist
 }
 
-// 2. 2dsphere index on SearchSessions.location
 print("[INDEX] Creating 2dsphere index on SearchSessions.location...");
 targetDb.SearchSessions.createIndex(
   { location: "2dsphere" },
@@ -283,7 +233,6 @@ targetDb.SearchSessions.createIndex(
   }
 );
 
-// 3. 2-Hour TTL index on SearchSessions.created_at (2 hours = 7200 seconds)
 print("[INDEX] Creating 2-hour TTL index (7200 seconds) on SearchSessions.created_at...");
 targetDb.SearchSessions.createIndex(
   { created_at: 1 },
@@ -294,7 +243,6 @@ targetDb.SearchSessions.createIndex(
   }
 );
 
-// 4. Secondary compound index for user session queries
 print("[INDEX] Creating compound index on SearchSessions (user_id, created_at)...");
 targetDb.SearchSessions.createIndex(
   { user_id: 1, created_at: -1 },
@@ -304,10 +252,8 @@ targetDb.SearchSessions.createIndex(
   }
 );
 
-// --- PropertyReviews Indexes ---
 print("[INDEX] Creating indexes on PropertyReviews...");
 
-// Compound index for fast property review retrieval ordered by recency
 targetDb.PropertyReviews.createIndex(
   { property_id: 1, created_at: -1 },
   {
@@ -316,7 +262,6 @@ targetDb.PropertyReviews.createIndex(
   }
 );
 
-// Index for rating distributions
 targetDb.PropertyReviews.createIndex(
   { rating: 1 },
   {
@@ -325,7 +270,6 @@ targetDb.PropertyReviews.createIndex(
   }
 );
 
-// Multikey index for tag unwind aggregations
 targetDb.PropertyReviews.createIndex(
   { location_tags: 1 },
   {
@@ -334,7 +278,6 @@ targetDb.PropertyReviews.createIndex(
   }
 );
 
-// Guest index for audit & profile history
 targetDb.PropertyReviews.createIndex(
   { guest_id: 1 },
   {
@@ -343,10 +286,8 @@ targetDb.PropertyReviews.createIndex(
   }
 );
 
-// --- PropertyAmenities Indexes ---
 print("[INDEX] Creating indexes on PropertyAmenities...");
 
-// Unique index on property_id
 targetDb.PropertyAmenities.createIndex(
   { property_id: 1 },
   {
@@ -356,7 +297,6 @@ targetDb.PropertyAmenities.createIndex(
   }
 );
 
-// Multikey index on amenities for catalog queries
 targetDb.PropertyAmenities.createIndex(
   { amenities: 1 },
   {
@@ -365,9 +305,6 @@ targetDb.PropertyAmenities.createIndex(
   }
 );
 
-// =============================================================================
-// VERIFY ACTIVE INDEXES
-// =============================================================================
 print("\n================================================================================");
 print("Active Indexes Summary:");
 print("================================================================================");
