@@ -1,6 +1,3 @@
--- Workflow 2: SQL Window Analytics
--- Calculate a 7-day moving average of booking revenue per property, ranked by DENSE_RANK()
-
 WITH daily_revenue AS (
     SELECT 
         property_id,

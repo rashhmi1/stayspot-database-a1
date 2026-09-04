@@ -1,4 +1,3 @@
--- 1. Structured Database (PostgreSQL) - Schema DDL
 
 CREATE TABLE guests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
