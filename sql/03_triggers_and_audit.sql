@@ -6,14 +6,12 @@ DECLARE
 BEGIN
     v_amount_changed := NEW.wallet_balance - OLD.wallet_balance;
     
-    -- Determine action type based on mathematical difference
     IF v_amount_changed < 0 THEN
         v_action_type := 'DEBIT';
     ELSE
         v_action_type := 'CREDIT';
     END IF;
     
-    -- Insert immutable log
     INSERT INTO wallet_audit_logs(guest_id, amount_changed, action_type, balance_after, timestamp)
     VALUES (NEW.id, ABS(v_amount_changed), v_action_type, NEW.wallet_balance, NOW());
     
