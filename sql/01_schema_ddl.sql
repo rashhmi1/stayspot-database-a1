@@ -27,6 +27,6 @@ CREATE TABLE bookings (
     guest_id UUID NOT NULL REFERENCES guests(id),
     property_id UUID NOT NULL REFERENCES properties(id),
     total_cost DECIMAL(10,2) NOT NULL,
-    status VARCHAR(20) NOT NULL CHECK (status IN ('CONFIRMED', 'CHECKED IN', 'COMPLETED')),
+    status VARCHAR(20) NOT NULL CHECK (status IN ('CONFIRMED', 'CHECKED_IN', 'COMPLETED')),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
